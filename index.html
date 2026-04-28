@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Stack 3D Master Ultimate - High Res</title>
+<style>
+  body {
+    margin: 0; padding: 0; 
+    background: radial-gradient(circle at center, #1a1a2e 0%, #05050a 100%);
+    color: white; font-family: 'Segoe UI', Roboto, sans-serif;
+    overflow: hidden; touch-action: none;
+    user-select: none;
+  }
+  canvas { display: block; width: 100vw; height: 100vh; image-rendering: auto; }
+  
+  .ui {
+    position: absolute; top: 5%; left: 0; width: 100%;
+    text-align: center; pointer-events: none; z-index: 10;
+  }
+  
+  #score { 
+    font-size: clamp(40px, 10vw, 80px); font-weight: 900; margin: 0; 
+    text-shadow: 0 0 20px rgba(0,242,254,0.5);
+  }
+  
+  #combo-ui {
+    font-size: 24px; color: #ffeb3b; font-weight: bold;
+    height: 35px; margin-top: -10px;
+    text-shadow: 0 0 15px rgba(255,235,59,0.7);
+  }
+
+  #bestScore { font-size: 18px; opacity: 0.8; margin-top: 5px; color: #00f2fe; }
+
+  .floating-text {
+    position: absolute; pointer-events: none;
+    font-weight: 900; text-transform: uppercase;
+    animation: floatUp 0.8s ease-out forwards;
+    z-index: 5; text-align: center;
+  }
+
+  @keyframes floatUp {
+    0% { transform: translate(-50%, 0) scale(0.5); opacity: 0; }
+    20% { transform: translate(-50%, -20px) scale(1.3); opacity: 1; }
+    100% { transform: translate(-50%, -120px) scale(1); opacity: 0; }
+  }
+
+  .msg {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10,10,25,0.95); padding: 40px;
+    border-radius: 20px; text-align: center; display: none;
+    border: 2px solid #00f2fe; box-shadow: 0 0 50px rgba(0,242,254,0.3);
+    z-index: 100; min-width: 280px;
+  }
+  
+  button {
+    background: #00f2fe; border: none; color: #000;
+    padding: 15px 40px; font-size: 20px; font-weight: bold;
+    cursor: pointer; border-radius: 50px; margin-top: 20px;
+    transition: transform 0.2s;
+  }
+  button:active { transform: scale(0.95); }
+
+  #start-hint {
+    position: absolute; bottom: 15%; width: 100%;
+    text-align: center; color: #00f2fe; font-size: 18px;
+    animation: blink 1.5s infinite;
+  }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+
+<div class="ui">
+  <p id="score">0</p>
+  <div id="combo-ui"></div>
+  <p id="bestScore">РЕКОРД: 0</p>
+</div>
+
+<div id="start-hint">ТОРКНІТЬСЯ, ЩОБ ПОЧАТИ</div>
+
+<div id="gameOverMsg" class="msg">
+  <h1 style="color: #ff3e3e; margin-top: 0;">ГРА ЗАКІНЧЕНА</h1>
+  <p id="finalScore" style="font-size: 24px;"></p>
+  <p id="newRecord" style="color: #00f2fe; display: none; font-weight: bold;">НОВИЙ РЕКОРД!</p>
+  <button id="restartBtn">ГРАТИ ЗНОВУ</button>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("score");
+const comboEl = document.getElementById("combo-ui");
+const bestEl = document.getElementById("bestScore");
+const msgEl = document.getElementById("gameOverMsg");
+const restartBtn = document.getElementById("restartBtn");
+const hintEl = document.getElementById("start-hint");
+
+let blocks = [];
+let debris = []; 
+let particles = [];
+let viewY = 0;
+let speed = 3.5;
+let dir = 1;
+let gameOver = false;
+let isMoving = false;
+let score = 0;
+let combo = 0;
+let perfectStreak = 0;
+let bestScore = localStorage.getItem("stack3d_best") || 0;
+let hue = 200;
+let moveAxis = 'x';
+let towerShake = 0;
+let dpr = window.devicePixelRatio || 1;
+
+const zoom = 0.6;
+const blockHeight = 35;
+let current = {};
+
+bestEl.innerText = `РЕКОРД: ${bestScore}`;
+
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  // Масштабуємо контекст, щоб координати в коді залишалися тими самими
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  render();
+}
+
+function init() {
+  resize();
+  score = 0; combo = 0; perfectStreak = 0;
+  speed = 3.5; gameOver = false; isMoving = false;
+  moveAxis = 'x'; debris = []; particles = []; towerShake = 0;
+  viewY = 0;
+  msgEl.style.display = "none";
+  hintEl.style.display = "block";
+  document.getElementById("newRecord").style.display = "none";
+  updateScoreUI();
+  hue = Math.random() * 360;
+  
+  blocks = [{ x: 0, z: 0, w: 180, d: 180, h: blockHeight, color: hue, y: 0 }];
+  spawnBlock();
+  render(); 
+}
+
+function spawnBlock() {
+  const last = blocks[blocks.length - 1];
+  moveAxis = moveAxis === 'x' ? 'z' : 'x';
+  current = {
+    x: last.x, z: last.z, w: last.w, d: last.d,
+    h: blockHeight, color: (hue += 7) % 360, y: last.y - blockHeight
+  };
+  if (moveAxis === 'x') { current.x = -320; dir = 1; }
+  else { current.z = -320; dir = 1; }
+}
+
+function drop() {
+  if (gameOver) return;
+  if (!isMoving) { isMoving = true; hintEl.style.display = "none"; requestAnimationFrame(loop); return; }
+
+  const last = blocks[blocks.length - 1];
+  let delta = moveAxis === 'x' ? current.x - last.x : current.z - last.z;
+  let size = moveAxis === 'x' ? last.w : last.d;
+  let overlap = size - Math.abs(delta);
+
+  if (overlap <= 0) { handleGameOver(); return; }
+
+  if (Math.abs(delta) < 8) {
+    combo++;
+    perfectStreak++;
+    score += combo;
+    towerShake = 6;
+    createParticles(current.x, current.z, `hsl(${current.color}, 100%, 70%)`);
+    
+    if (perfectStreak >= 5) {
+      current.w += 15; current.d += 15;
+      perfectStreak = 0;
+      showFloatingText("EXPANDED!", "#00ff88", "");
+    } else {
+      showFloatingText("PERFECT!", "#00f2fe", combo);
+    }
+    
+    if (moveAxis === 'x') current.x = last.x; else current.z = last.z;
+  } else {
+    const cutSize = Math.abs(delta);
+    perfectStreak = 0;
+    combo = 0;
+    score += 1;
+
+    if (moveAxis === 'x') {
+      let debrisX = delta > 0 ? current.x + overlap : current.x - cutSize;
+      createDebris(debrisX, current.y, current.z, cutSize, current.d, current.color);
+      current.w = overlap;
+      if (delta < 0) current.x = last.x;
+    } else {
+      let debrisZ = delta > 0 ? current.z + overlap : current.z - cutSize;
+      createDebris(current.x, current.y, debrisZ, current.w, cutSize, current.color);
+      current.d = overlap;
+      if (delta < 0) current.z = last.z;
+    }
+    showFloatingText("GOOD!", "#fff", 1);
+  }
+
+  blocks.push({ ...current });
+  updateScoreUI();
+  speed = Math.min(8.5, 3.5 + (blocks.length * 0.05));
+  spawnBlock();
+}
+
+function createDebris(x, y, z, w, d, color) {
+  debris.push({ x, y, z, w, d, color, vy: 0, ay: 0.6, life: 90 });
+}
+
+function createParticles(x, z, color) {
+  for(let i=0; i<12; i++) {
+    particles.push({
+      x, z, y: current.y,
+      vx: (Math.random()-0.5)*12, vz: (Math.random()-0.5)*12,
+      vy: -Math.random()*6, color, size: Math.random()*3+2, life: 1
+    });
+  }
+}
+
+function drawCube(x, y, z, w, d, h, color, isMovingBlock = false) {
+  let sX = 0, sY = 0;
+  if (!isMovingBlock && towerShake > 0) {
+    sX = (Math.random() - 0.5) * towerShake;
+    sY = (Math.random() - 0.5) * towerShake;
+  }
+
+  const isoX = window.innerWidth / 2 + (x - z) * zoom + sX;
+  const isoY = window.innerHeight / 2 + (x + z) / 2 * zoom + y * zoom + viewY + sY;
+  const sw = w * zoom; const sd = d * zoom; const sh = h * zoom;
+
+  // Використовуємо Path2D для кращої продуктивності при високій роздільній здатності
+  // Top
+  ctx.beginPath();
+  ctx.moveTo(isoX, isoY);
+  ctx.lineTo(isoX + sw, isoY + sw / 2);
+  ctx.lineTo(isoX + sw - sd, isoY + (sw + sd) / 2);
+  ctx.lineTo(isoX - sd, isoY + sd / 2);
+  ctx.closePath();
+  ctx.fillStyle = `hsl(${color}, 70%, 60%)`;
+  ctx.fill();
+
+  // Sides
+  ctx.beginPath();
+  ctx.moveTo(isoX + sw, isoY + sw / 2); ctx.lineTo(isoX + sw, isoY + sw / 2 + sh);
+  ctx.lineTo(isoX + sw - sd, isoY + (sw + sd) / 2 + sh); ctx.lineTo(isoX + sw - sd, isoY + (sw + sd) / 2);
+  ctx.closePath();
+  ctx.fillStyle = `hsl(${color}, 70%, 45%)`; ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(isoX - sd, isoY + sd / 2); ctx.lineTo(isoX - sd, isoY + sd / 2 + sh);
+  ctx.lineTo(isoX + sw - sd, isoY + (sw + sd) / 2 + sh); ctx.lineTo(isoX + sw - sd, isoY + (sw + sd) / 2);
+  ctx.closePath();
+  ctx.fillStyle = `hsl(${color}, 70%, 35%)`; ctx.fill();
+
+  if (isMovingBlock) {
+    ctx.strokeStyle = "rgba(255,255,255,0.6)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+function handleGameOver() {
+  gameOver = true; isMoving = false;
+  document.getElementById("finalScore").innerText = `РАХУНОК: ${score}`;
+  if (score > bestScore) {
+    bestScore = score;
+    localStorage.setItem("stack3d_best", bestScore);
+    bestEl.innerText = `РЕКОРД: ${bestScore}`;
+    document.getElementById("newRecord").style.display = "block";
+  }
+  msgEl.style.display = "block";
+}
+
+function update() {
+  if (gameOver || !isMoving) return;
+  if (moveAxis === 'x') { current.x += speed * dir; if (Math.abs(current.x) > 320) dir *= -1; }
+  else { current.z += speed * dir; if (Math.abs(current.z) > 320) dir *= -1; }
+  
+  if (towerShake > 0) towerShake *= 0.85;
+  if (towerShake < 0.1) towerShake = 0;
+
+  debris.forEach((d, i) => {
+    d.y += d.vy; d.vy += d.ay; d.life--;
+    if (d.life <= 0) debris.splice(i, 1);
+  });
+
+  particles.forEach((p, i) => {
+    p.x += p.vx; p.z += p.vz; p.y += p.vy; p.vy += 0.25; p.life -= 0.025;
+    if (p.life <= 0) particles.splice(i, 1);
+  });
+}
+
+function render() {
+  ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  
+  const targetViewY = (blocks.length * blockHeight * zoom);
+  viewY += (targetViewY - viewY) * 0.1;
+  
+  // Малюємо блоки вежі
+  blocks.forEach((b, i) => drawCube(b.x, b.y, b.z, b.w, b.d, b.h, b.color, false));
+  
+  // Уламки
+  debris.forEach(d => drawCube(d.x, d.y, d.z, d.w, d.d, blockHeight, d.color, false));
+  
+  // Іскри (частки)
+  particles.forEach(p => {
+    const px = window.innerWidth / 2 + (p.x - p.z) * zoom;
+    const py = window.innerHeight / 2 + (p.x + p.z) / 2 * zoom + p.y * zoom + viewY;
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = p.life;
+    ctx.beginPath();
+    ctx.arc(px, py, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  if (!gameOver) drawCube(current.x, current.y, current.z, current.w, current.d, current.h, current.color, true);
+}
+
+function showFloatingText(text, color, pts) {
+  const div = document.createElement('div');
+  div.className = 'floating-text';
+  div.innerHTML = `${text}${pts ? '<br>+'+pts : ''}`;
+  div.style.left = '50%'; div.style.top = '45%'; div.style.color = color;
+  document.body.appendChild(div);
+  setTimeout(() => div.remove(), 800);
+}
+
+function updateScoreUI() {
+  scoreEl.innerText = score;
+  comboEl.innerText = combo > 1 ? `COMBO ×${combo}` : "";
+}
+
+function loop() { 
+    if (!gameOver && isMoving) { 
+        update(); 
+        render(); 
+        requestAnimationFrame(loop); 
+    } 
+}
+
+window.addEventListener("resize", resize);
+window.addEventListener("pointerdown", e => { if (e.target.tagName !== 'BUTTON') drop(); });
+window.addEventListener("keydown", e => { if (e.code === "Space") drop(); });
+restartBtn.addEventListener("click", init);
+
+init();
+</script>
+</body>
+</html>
