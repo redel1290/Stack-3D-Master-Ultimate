@@ -3,7 +3,7 @@ const CACHE_NAME = 'stack-3d-v1';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
-  './icon.png',
+  './icon-512.png',
   './manifest.json'
 ];
 
